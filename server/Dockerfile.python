@@ -1,0 +1,14 @@
+FROM python:3.12-alpine
+
+# Create unprivileged sandbox user
+RUN addgroup -S sandbox && adduser -S sandbox -G sandbox
+
+# Set up working directory
+WORKDIR /app
+RUN chown -R sandbox:sandbox /app
+
+# Switch to non-privileged user
+USER sandbox
+
+# Entrypoint is python
+ENTRYPOINT ["python", "-u"]
