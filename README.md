@@ -1,8 +1,11 @@
 # AetherCode - Cloud-Based Sandboxed Code Execution Platform
 
-A secure, isolated cloud code execution engine and web IDE built with **React**, **Node.js/Express**, and **Docker Sandboxing**.
+A secure, isolated cloud code execution engine and web IDE built with **React**, **Pyodide WebAssembly (Serverless in-browser)**, and **Docker Sandboxing**.
+
+🌐 **Live GitHub Pages URL**: **[https://prasannapbhurke.github.io/cloud-based--based-online-code-execution-platform/](https://prasannapbhurke.github.io/cloud-based--based-online-code-execution-platform/)**
 
 ---
+
 
 ## 🏗️ Architecture Overview
 

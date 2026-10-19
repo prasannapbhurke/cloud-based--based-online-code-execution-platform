@@ -19,6 +19,7 @@ import {
   Lock,
   WifiOff
 } from 'lucide-react';
+import { runPythonInBrowser, getPyodide } from './services/pyodideRunner.js';
 
 const CODE_TEMPLATES = {
   error_handling: {
@@ -824,6 +825,14 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [serverStatus, setServerStatus] = useState('checking'); // 'online' | 'offline' | 'checking'
   const [serverHealth, setServerHealth] = useState(null);
+  const [pyodideReady, setPyodideReady] = useState(false);
+
+  // Pre-warm WebAssembly Pyodide engine for instant execution
+  useEffect(() => {
+    getPyodide()
+      .then(() => setPyodideReady(true))
+      .catch((e) => console.warn('Pyodide background pre-warm:', e.message));
+  }, []);
 
   // Check backend server health
   useEffect(() => {
@@ -859,7 +868,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [code, stdin, timeoutSec, isRunning]);
+  }, [code, stdin, timeoutSec, isRunning, serverStatus]);
 
   const handleTemplateChange = (e) => {
     const key = e.target.value;
@@ -879,18 +888,37 @@ export default function App() {
     const startTime = Date.now();
 
     try {
-      const response = await fetch('/api/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code,
-          language: 'python',
-          stdin,
-          timeoutMs: timeoutSec * 1000
-        })
-      });
+      let data;
 
-      const data = await response.json();
+      // If backend is online, run in Docker container
+      if (serverStatus === 'online') {
+        try {
+          const response = await fetch('/api/execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code,
+              language: 'python',
+              stdin,
+              timeoutMs: timeoutSec * 1000
+            })
+          });
+
+          if (response.ok) {
+            data = await response.json();
+          } else {
+            throw new Error(`Server returned HTTP ${response.status}`);
+          }
+        } catch (fetchErr) {
+          // If network / Docker call fails, fallback to in-browser WebAssembly
+          console.warn('Backend unavailable, falling back to WebAssembly:', fetchErr.message);
+          data = await runPythonInBrowser({ code, stdin });
+        }
+      } else {
+        // 100% Serverless execution via in-browser Pyodide WebAssembly (GitHub Pages)
+        data = await runPythonInBrowser({ code, stdin });
+      }
+
       setResult(data);
 
       // Add to history
@@ -908,7 +936,7 @@ export default function App() {
         status: 'error',
         exitCode: 1,
         stdout: '',
-        stderr: `Network / Gateway Error: ${err.message}`,
+        stderr: `Execution Engine Error: ${err.message}`,
         executionTimeMs: Date.now() - startTime
       });
     } finally {
@@ -938,14 +966,23 @@ export default function App() {
             <Zap size={18} />
           </div>
           <span className="brand-text">AetherCode</span>
-          <span className="brand-badge">Docker Sandbox</span>
+          <span className="brand-badge">
+            {serverStatus === 'online' ? 'Docker Sandbox' : 'WebAssembly Serverless'}
+          </span>
         </div>
 
         <div className="nav-actions">
-          {/* Server Connection Status */}
-          <div className="status-pill" title={serverStatus === 'online' ? 'Backend Docker sandbox connected' : 'Connecting to sandbox backend...'}>
-            <span className={`status-dot ${serverStatus === 'online' ? 'status-online' : (serverStatus === 'checking' ? 'status-busy' : 'status-offline')}`} />
-            <span>{serverStatus === 'online' ? 'Engine Online' : (serverStatus === 'checking' ? 'Checking...' : 'Engine Disconnected')}</span>
+          {/* Server / Engine Status */}
+          <div 
+            className="status-pill" 
+            title={serverStatus === 'online' ? 'Connected to isolated Docker sandbox' : 'Running 100% serverless via browser WebAssembly'}
+          >
+            <span className={`status-dot ${serverStatus === 'online' ? 'status-online' : (pyodideReady ? 'status-online' : 'status-busy')}`} />
+            <span>
+              {serverStatus === 'online' 
+                ? 'Docker Sandbox' 
+                : (pyodideReady ? 'WASM Serverless' : 'Starting WASM...')}
+            </span>
           </div>
 
           {/* Timeout Selector */}
@@ -968,7 +1005,7 @@ export default function App() {
           <button 
             className="btn-run" 
             onClick={handleExecute} 
-            disabled={isRunning || serverStatus === 'offline'}
+            disabled={isRunning}
             title="Execute Code (Ctrl + Enter)"
           >
             <Play size={16} fill="currentColor" />
